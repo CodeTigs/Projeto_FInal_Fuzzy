@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle Inteligente Data Center</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #eef2f5; margin: 0; padding: 20px; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; color: #2c3e50; margin-bottom: 30px; }
+
+        .alert-box {
+            background: #e53935; color: white; padding: 15px; border-radius: 8px;
+            margin-bottom: 20px; display: none; text-align: center; font-weight: bold; font-size: 1.2em;
+            box-shadow: 0 4px 10px rgba(229, 57, 53, 0.3); animation: pulse 1s infinite;
+        }
+        .alert-box.blue { background: #0288d1; }
+        .alert-box.finish { background: #43a047; animation: none; } 
+        @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.01); } 100% { opacity: 1; transform: scale(1); } }
+
+        .control-panel { background: white; padding: 25px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); border-left: 6px solid #3949ab; }
+        .control-row { display: flex; gap: 15px; align-items: flex-end; margin-top: 15px; flex-wrap: wrap; }
+        .input-group { flex: 1; min-width: 120px; }
+        .input-group label { display: block; font-weight: 600; color: #546e7a; margin-bottom: 8px; font-size: 0.9em; }
+        .input-group input { width: 100%; padding: 12px; border: 1px solid #cfd8dc; border-radius: 6px; font-size: 1em; box-sizing: border-box; }
+        
+        .btn { padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; color: white; transition: background 0.3s; flex-grow: 1; }
+        .btn-send { background: #3949ab; }
+        .btn-auto { background: #00897b; }
+        .btn-pause { background: #fbc02d; color: #333; }
+        .btn-pause.paused { background: #ff6f00; color: white; animation: pulse-btn 1s infinite; }
+        .btn-restart { background: #546e7a; color: white; }
+        @keyframes pulse-btn { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
+
+        .status-row { display: flex; gap: 20px; margin-bottom: 25px; flex-wrap: wrap; }
+        .card { flex: 1; min-width: 200px; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center; position: relative; overflow: hidden; }
+        .card::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 4px; background: #ddd; }
+        .card.temp::after { background: #ef5350; }
+        .card.power::after { background: #42a5f5; }
+        .card.oxygen::after { background: #66bb6a; }
+        .card.oxygen.closed::after { background: #d32f2f; }
+        .metric-title { font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; color: #78909c; font-weight: 700; }
+        .metric-value { font-size: 2.2em; font-weight: 700; color: #37474f; margin-top: 10px; }
+
+        .tab-container { margin-bottom: 20px; border-bottom: 1px solid #cfd8dc; }
+        .tab-btn { background: none; border: none; padding: 10px 20px; font-size: 1em; color: #78909c; cursor: pointer; font-weight: 600; border-bottom: 3px solid transparent; }
+        .tab-btn.active { color: #3949ab; border-bottom-color: #3949ab; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .chart-box { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); min-height: 400px; display: flex; align-items: center; }
+        .full-width { grid-column: span 2; margin-bottom: 20px; }
+        canvas { width: 100% !important; height: 100% !important; max-height: 450px; }
+        
+        .rules-gallery { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; }
+        .rules-gallery img { max-width: 32%; border: 1px solid #ddd; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Controle Térmico Data Center</h1>
+
+        <div id="alertPanel" class="alert-box">...</div>
+
+        <div class="control-panel">
+            <h3 style="margin:0; color: #3949ab;">🎛️ Painel de Controle</h3>
+            <div class="control-row">
+                <div class="input-group"><label>Setpoint (°C)</label><input type="number" id="inSetpoint" value="22" min="16" max="32"></div>
+                <div class="input-group"><label>T. Externa (°C)</label><input type="number" id="inText" value="25" min="10" max="35"></div>
+                <div class="input-group"><label>Carga Servidor (%)</label><input type="number" id="inQest" value="40" min="0" max="100"></div>
+                
+                <button class="btn btn-send" onclick="aplicarManual()">APLICAR MANUAL</button>
+                <button class="btn btn-auto" onclick="voltarAuto()">VOLTAR P/ SIMULAÇÃO</button>
+                <button class="btn btn-pause" id="btnPause" onclick="togglePause()">PAUSAR</button>
+                <button class="btn btn-restart" onclick="reiniciarSimulacao()">REINICIAR</button>
+            </div>
+        </div>
+
+        <div class="status-row">
+            <div class="card temp">
+                <div class="metric-title">Temperatura Interna</div>
+                <div class="metric-value" id="valTemp">-- °C</div>
+            </div>
+            <div class="card power">
+                <div class="metric-title">Potência Ar</div>
+                <div class="metric-value" id="valCrac">-- %</div>
+            </div>
+            <div class="card oxygen" id="cardOxygen">
+                <div class="metric-title">Entradas de Ar</div>
+                <div class="metric-value" id="valOxygen">ABERTO</div>
+            </div>
+            <div class="card mode">
+                <div class="metric-title">Modo de Operação</div>
+                <div class="metric-value" id="valMode" style="font-size: 1.5em; color: #00897b;">AUTO</div>
+            </div>
+        </div>
+
+        <div class="tab-container">
+            <button class="tab-btn active" onclick="switchTab('realtime', event)">Tempo Real</button>
+            <button class="tab-btn" onclick="switchTab('history', event)">Histórico Completo</button>
+            <button class="tab-btn" onclick="switchTab('regras', event)">Regras Fuzzy</button>
+        </div>
+
+        <div id="realtime" class="tab-content active">
+            <div class="charts-grid">
+                <div class="chart-box"><canvas id="tempChart"></canvas></div>
+                <div class="chart-box"><canvas id="powerChart"></canvas></div>
+            </div>
+        </div>
+
+        <div id="history" class="tab-content">
+            <div class="chart-box full-width"><canvas id="histTempChart"></canvas></div>
+            <div class="chart-box full-width"><canvas id="histPowerChart"></canvas></div>
+        </div>
+
+        <div id="regras" class="tab-content">
+            <h3 style="text-align:center; color:#555;">Visualização das Regras Fuzzy</h3>
+            <div class="rules-gallery">
+                <img src="grafico_erro.png" alt="Erro" onerror="this.src='https://placehold.co/400x300?text=Rodar+Python';">
+                <img src="grafico_delta.png" alt="Delta" onerror="this.src='https://placehold.co/400x300?text=Rodar+Python';">
+                <img src="grafico_saida.png" alt="Saída" onerror="this.src='https://placehold.co/400x300?text=Rodar+Python';">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const broker = "broker.mqtt-dashboard.com";
+        const port = 8000;
+        const clientID = "web_ui_" + parseInt(Math.random() * 100000);
+        const client = new Paho.MQTT.Client(broker, port, clientID);
+        let isPaused = false;
+        let alertTimeout = null;
+
+        function switchTab(id, event) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            const btn = document.getElementById("btnPause");
+            let cmd = isPaused ? "PAUSE" : "PLAY";
+            btn.innerText = isPaused ? "CONTINUAR" : "PAUSAR";
+            btn.classList.toggle("paused");
+            client.send("datacenter/fuzzy/set_params", JSON.stringify({cmd: cmd}));
+        }
+
+        function reiniciarSimulacao() {
+            if(confirm("Deseja reiniciar a simulação de 24h? Os gráficos serão limpos.")) {
+                client.send("datacenter/fuzzy/set_params", JSON.stringify({cmd: "RESTART"}));
+                isPaused = false;
+                const btn = document.getElementById("btnPause");
+                btn.innerText = "PAUSAR";
+                btn.classList.remove("paused");
+            }
+        }
+
+        function aplicarManual() {
+            const sp = document.getElementById('inSetpoint').value;
+            const te = document.getElementById('inText').value;
+            const qe = document.getElementById('inQest').value;
+            client.send("datacenter/fuzzy/set_params", JSON.stringify({ mode: "MANUAL", setpoint: sp, t_ext: te, q_est: qe }));
+            document.getElementById("valMode").innerText = "MANUAL";
+            document.getElementById("valMode").style.color = "#3949ab";
+        }
+
+        function voltarAuto() {
+            client.send("datacenter/fuzzy/set_params", JSON.stringify({ mode: "AUTO" }));
+            document.getElementById("valMode").innerText = "AUTO";
+            document.getElementById("valMode").style.color = "#00897b";
+        }
+
+        const commonOpts = { responsive: true, maintainAspectRatio: false, animation: false, elements: { point: { radius: 0 } }, interaction: { mode: 'index', intersect: false } };
+        
+        const tempChart = new Chart(document.getElementById('tempChart'), {
+            type: 'line', data: { labels: [], datasets: [{ label: 'Temperatura', data: [], borderColor: '#ef5350', borderWidth: 2, tension: 0.3 }, { label: 'Setpoint', data: [], borderColor: '#90a4ae', borderWidth: 1, borderDash: [5, 5] }] },
+            options: { ...commonOpts, scales: { y: { min: 14, max: 32 } } }
+        });
+        const powerChart = new Chart(document.getElementById('powerChart'), {
+            type: 'line', data: { labels: [], datasets: [{ label: 'CRAC (%)', data: [], borderColor: '#42a5f5', backgroundColor: 'rgba(66, 165, 245, 0.2)', fill: true }] },
+            options: { ...commonOpts, scales: { y: { min: 0, max: 100 } } }
+        });
+        const histTempChart = new Chart(document.getElementById('histTempChart'), { type: 'line', data: { labels: [], datasets: [{ label: 'Histórico Temp', data: [], borderColor: '#c62828', borderWidth: 1 }] }, options: { ...commonOpts, scales: { x: { ticks: { maxTicksLimit: 20 } } } } });
+        const histPowerChart = new Chart(document.getElementById('histPowerChart'), { type: 'line', data: { labels: [], datasets: [{ label: 'Histórico Potência', data: [], borderColor: '#1565c0', borderWidth: 1, fill: true }] }, options: { ...commonOpts, scales: { x: { ticks: { maxTicksLimit: 20 } } } } });
+
+        function resetCharts() {
+            [tempChart, powerChart, histTempChart, histPowerChart].forEach(chart => {
+                chart.data.labels = [];
+                chart.data.datasets.forEach(ds => ds.data = []);
+                chart.update();
+            });
+        }
+
+        client.onMessageArrived = function (msg) {
+            try {
+                const topic = msg.destinationName;
+                const data = JSON.parse(msg.payloadString);
+
+                if (topic.includes("control") && data.status === "RESET") {
+                    resetCharts();
+                    return;
+                }
+
+                if (topic.includes("alert")) {
+                    const panel = document.getElementById("alertPanel");
+                    if (data && data.msg) {
+                        panel.innerText = `${data.msg} ${data.valor ? '('+data.valor+'°C)' : ''}`;
+                        panel.className = "alert-box"; 
+                        if (data.tipo === "BAIXA") panel.classList.add("blue");
+                        if (data.tipo === "INFO") panel.classList.add("finish");
+                        panel.style.display = "block";
+                        if (data.tipo !== "FOGO" && data.tipo !== "INFO") {
+                            if(alertTimeout) clearTimeout(alertTimeout);
+                            alertTimeout = setTimeout(() => { panel.style.display = "none"; }, 3000);
+                        }
+                    }
+                }
+
+                if (topic.includes("temp") && data.temperatura !== undefined) {
+                    document.getElementById("valTemp").innerText = data.temperatura + " °C";
+                    if (tempChart.data.labels.length > 0 && data.tempo < tempChart.data.labels[tempChart.data.labels.length-1]) {
+                        resetCharts();
+                    }
+                    if (tempChart.data.labels.length > 50) {
+                        tempChart.data.labels.shift(); tempChart.data.datasets[0].data.shift(); tempChart.data.datasets[1].data.shift();
+                    }
+                    tempChart.data.labels.push(data.tempo);
+                    tempChart.data.datasets[0].data.push(data.temperatura);
+                    tempChart.data.datasets[1].data.push(22);
+                    tempChart.update();
+
+                    histTempChart.data.labels.push(data.tempo);
+                    histTempChart.data.datasets[0].data.push(data.temperatura);
+                    if(data.tempo % 5 === 0) histTempChart.update();
+                }
+
+                if (topic.includes("control") && data.p_crac !== undefined) {
+                    document.getElementById("valCrac").innerText = data.p_crac + " %";
+
+                    if(data.modo === "AUTO" && !isPaused) {
+                        document.getElementById("valMode").innerText = "AUTO";
+                        document.getElementById("valMode").style.color = "#00897b";
+                        document.getElementById("inSetpoint").value = data.setpoint;
+                        document.getElementById("inText").value = data.t_ext;
+                        document.getElementById("inQest").value = data.q_est;
+                    } else if (data.modo === "CONCLUIDO") {
+                        document.getElementById("valMode").innerText = "CONCLUÍDO";
+                        document.getElementById("valMode").style.color = "#43a047";
+                    }
+
+                    const statusO2 = data.oxigenio;
+                    document.getElementById("valOxygen").innerText = statusO2;
+                    const cardO2 = document.getElementById("cardOxygen");
+                    if (statusO2 === "FECHADO") {
+                        cardO2.classList.add("closed");
+                        document.getElementById("valOxygen").style.color = "#d32f2f";
+                    } else {
+                        cardO2.classList.remove("closed");
+                        document.getElementById("valOxygen").style.color = "#333";
+                    }
+
+                    if (powerChart.data.labels.length > 50) {
+                        powerChart.data.labels.shift(); powerChart.data.datasets[0].data.shift();
+                    }
+                    powerChart.data.labels.push(data.tempo);
+                    powerChart.data.datasets[0].data.push(data.p_crac);
+                    powerChart.update();
+
+                    histPowerChart.data.labels.push(data.tempo);
+                    histPowerChart.data.datasets[0].data.push(data.p_crac);
+                    if(data.tempo % 5 === 0) histPowerChart.update();
+                }
+            } catch (e) { console.log("Aguardando...", e); }
+        };
+
+        client.connect({ onSuccess: () => {
+            console.log("Conectado!");
+            client.subscribe("datacenter/fuzzy/#");
+        }});
+    </script>
+</body>
+</html>
