@@ -23,9 +23,8 @@ simulacao_pausada = False
 solicitacao_reset = False
 params_manuais = {"setpoint": 22.0, "t_ext": 25.0, "q_est": 40.0}
 
-# =============================================================================
 # 1. FUZZY ROBUSTO
-# =============================================================================
+
 erro = ctrl.Antecedent(np.arange(-10, 11, 0.1), 'erro')
 delta_erro = ctrl.Antecedent(np.arange(-2, 3, 0.1), 'delta_erro')
 p_crac = ctrl.Consequent(np.arange(0, 101, 1), 'p_crac')
@@ -69,9 +68,8 @@ regras.append(ctrl.Rule(erro['NG'], p_crac['P0']))
 sistema_controle = ctrl.ControlSystem(regras)
 simulador_fuzzy = ctrl.ControlSystemSimulation(sistema_controle)
 
-# =============================================================================
 # 2. MODELO FÍSICO
-# =============================================================================
+
 def modelo_fisico_pdf(t_atual, p_crac, q_est, t_ext):
     t_next = (0.9 * t_atual) - (0.08 * p_crac) + (0.05 * q_est) + (0.02 * t_ext) + 3.5
     return t_next
@@ -156,10 +154,8 @@ def main():
             q_est_val = float(params_manuais["q_est"])
         else:
             setpoint = 22.0
-            # --- CONSTANTES CONFORME SOLICITADO ---
             t_ext_val = 25.0
             q_est_val = 40.0
-            # --------------------------------------
 
         # Perturbação (Fogo às 14:00)
         if not modo_manual and 840 <= minuto < 845 and not modo_incendio:
@@ -214,7 +210,6 @@ def main():
         if alert_msg:
              client.publish(TOPIC_ALERT, json.dumps({"tipo": tipo_alerta, "msg": alert_msg, "valor": round(t_next, 1)}))
         
-        # Publicação
         dados = {
             "tempo": minuto, "setpoint": setpoint, "p_crac": round(p_crac_nova, 2),
             "t_ext": round(t_ext_val, 2), "q_est": round(q_est_val, 2),
@@ -231,4 +226,5 @@ def main():
         time.sleep(0.1)
 
 if __name__ == "__main__":
+
     main()
